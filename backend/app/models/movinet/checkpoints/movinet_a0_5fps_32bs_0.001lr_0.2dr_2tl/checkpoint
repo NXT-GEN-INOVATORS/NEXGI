@@ -1,0 +1,2 @@
+model_checkpoint_path: "movinet_a0_stream_wbm"
+all_model_checkpoint_paths: "movinet_a0_stream_wbm"
