@@ -1,0 +1,14 @@
+# VisionTrace AI
+- [x] Material UI shell and overview
+- [x] AI search and grounded evidence, configurable AWS API
+- [x] Video library and frontend database integration
+- [x] All navigation pages and settings
+- [x] Verify interface and database access
+- [x] Public Home and About with refreshed typography
+- [x] Dashboard navigation after sign-in and return Home on sign-out
+- [x] Separate File and URL upload options with validation
+- [x] Highlighted bottom-center AI Search
+- [x] Verify navigation, uploads, and narrow-screen presentation
+- [x] Connect Sarvam text-to-speech securely and verify audio playback
+- [x] Enable microphone questions with secure transcription and verify actual speech
+- [x] Show incremental voice chunks and retain visible long questions; verify recording and text preservation.
