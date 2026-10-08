@@ -1,0 +1,14 @@
+torch
+torchvision
+transformers
+accelerate
+safetensors
+pillow
+numpy
+fastapi
+uvicorn
+python-multipart
+psutil
+opencv-python
+requests
+boto3

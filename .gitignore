@@ -30,3 +30,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python & AI Data
+__pycache__/
+*.py[cod]
+backend/data/frames/
+backend/data/videos/upload_*

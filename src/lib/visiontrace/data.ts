@@ -1,8 +1,33 @@
 import axios from 'axios';
 import gate from '@/assets/gate-camera.jpg';
-export const backendUrl = (import.meta.env['VITE_AI_BACKEND_URL'] as string | undefined)?.replace(/\/+$/, '') ?? '';
-export const ai = axios.create({baseURL:backendUrl,timeout:30000});
-export type Evidence = { id:string; camera_id:string; camera_name:string; location:string; timestamp:string; confidence:number; objects:string[]; thumbnail_url?:string; clip_url?:string; bounding_box?:{x:number;y:number;width:number;height:number}; sample?:boolean };
+export const backendUrl = ((import.meta.env['VITE_AI_BACKEND_URL'] as string | undefined)?.replace(/\/+$/, '')) || 'http://127.0.0.1:8000';
+export const ai = axios.create({baseURL:backendUrl,timeout:35000});
+
+export function resolveMediaUrl(url?: string): string | undefined {
+  if (!url) return undefined;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:') || url.startsWith('blob:')) {
+    return url;
+  }
+  return `${backendUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+}
+
+export type Evidence = {
+  id: string;
+  camera_id: string;
+  camera_name: string;
+  location: string;
+  timestamp: string;
+  confidence: number;
+  objects: string[];
+  thumbnail_url?: string;
+  clip_url?: string;
+  bounding_box?: { x: number; y: number; width: number; height: number };
+  sample?: boolean;
+  explanation?: string;
+  raw_cosine?: number;
+  match_score?: number;
+  storage_image_url?: string;
+};
 export const sampleEvidence:Evidence[] = [
  {id:'sample-1',camera_id:'CAM-03',camera_name:'Main Gate',location:'North entrance',timestamp:'10:42:17',confidence:94,objects:['Car','Red'],thumbnail_url:gate,sample:true},
  {id:'sample-2',camera_id:'CAM-06',camera_name:'East Walkway',location:'Building B',timestamp:'09:31:08',confidence:89,objects:['Person','Backpack'],sample:true},
