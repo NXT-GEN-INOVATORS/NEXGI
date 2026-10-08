@@ -18,6 +18,7 @@ import { Route as CamerasRouteImport } from './routes/cameras'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as EventLibraryRouteImport } from './routes/event-library'
 import { Route as InvestigationsRouteImport } from './routes/investigations'
+import { Route as ObjectTrackingRouteImport } from './routes/object-tracking'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SpatialMemoryRouteImport } from './routes/spatial-memory'
 import { Route as VideoIntelligenceRouteImport } from './routes/video-intelligence'
@@ -68,6 +69,11 @@ const InvestigationsRoute = InvestigationsRouteImport.update({
   path: '/investigations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ObjectTrackingRoute = ObjectTrackingRouteImport.update({
+  id: '/object-tracking',
+  path: '/object-tracking',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -99,6 +105,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/event-library': typeof EventLibraryRoute
   '/investigations': typeof InvestigationsRoute
+  '/object-tracking': typeof ObjectTrackingRoute
   '/settings': typeof SettingsRoute
   '/spatial-memory': typeof SpatialMemoryRoute
   '/video-intelligence': typeof VideoIntelligenceRoute
@@ -114,6 +121,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/event-library': typeof EventLibraryRoute
   '/investigations': typeof InvestigationsRoute
+  '/object-tracking': typeof ObjectTrackingRoute
   '/settings': typeof SettingsRoute
   '/spatial-memory': typeof SpatialMemoryRoute
   '/video-intelligence': typeof VideoIntelligenceRoute
@@ -130,6 +138,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/event-library': typeof EventLibraryRoute
   '/investigations': typeof InvestigationsRoute
+  '/object-tracking': typeof ObjectTrackingRoute
   '/settings': typeof SettingsRoute
   '/spatial-memory': typeof SpatialMemoryRoute
   '/video-intelligence': typeof VideoIntelligenceRoute
@@ -147,6 +156,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/event-library'
     | '/investigations'
+    | '/object-tracking'
     | '/settings'
     | '/spatial-memory'
     | '/video-intelligence'
@@ -162,6 +172,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/event-library'
     | '/investigations'
+    | '/object-tracking'
     | '/settings'
     | '/spatial-memory'
     | '/video-intelligence'
@@ -177,6 +188,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/event-library'
     | '/investigations'
+    | '/object-tracking'
     | '/settings'
     | '/spatial-memory'
     | '/video-intelligence'
@@ -193,6 +205,7 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   EventLibraryRoute: typeof EventLibraryRoute
   InvestigationsRoute: typeof InvestigationsRoute
+  ObjectTrackingRoute: typeof ObjectTrackingRoute
   SettingsRoute: typeof SettingsRoute
   SpatialMemoryRoute: typeof SpatialMemoryRoute
   VideoIntelligenceRoute: typeof VideoIntelligenceRoute
@@ -264,6 +277,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InvestigationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/object-tracking': {
+      id: '/object-tracking'
+      path: '/object-tracking'
+      fullPath: '/object-tracking'
+      preLoaderRoute: typeof ObjectTrackingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -305,6 +325,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   EventLibraryRoute: EventLibraryRoute,
   InvestigationsRoute: InvestigationsRoute,
+  ObjectTrackingRoute: ObjectTrackingRoute,
   SettingsRoute: SettingsRoute,
   SpatialMemoryRoute: SpatialMemoryRoute,
   VideoIntelligenceRoute: VideoIntelligenceRoute,

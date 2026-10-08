@@ -7,7 +7,6 @@ function isNewSupabaseApiKey(value: string): boolean {
   return value.startsWith('sb_publishable_') || value.startsWith('sb_secret_');
 }
 
-// The public URL can be reachable only from the browser, so server requests go to the runtime URL of the same backend.
 function serverSupabaseUrl(publicUrl: string, supabaseKey: string): string | undefined {
   if (typeof window !== 'undefined' || typeof process === 'undefined') return undefined;
   const serverUrl = process.env['SUPABASE_URL']?.replace(/\/+$/, '');
@@ -22,16 +21,12 @@ function createSupabaseFetch(supabaseUrl: string, supabaseKey: string): typeof f
     const headers = new Headers(
       typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined,
     );
-
     if (init?.headers) {
       new Headers(init.headers).forEach((value, key) => headers.set(key, value));
     }
-
-    // New Supabase API keys are opaque strings, not bearer JWTs.
     if (isNewSupabaseApiKey(supabaseKey) && headers.get('Authorization') === `Bearer ${supabaseKey}`) {
       headers.delete('Authorization');
     }
-
     headers.set('apikey', supabaseKey);
     if (serverUrl) {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -45,21 +40,47 @@ function createSupabaseFetch(supabaseUrl: string, supabaseKey: string): typeof f
   };
 }
 
+// Minimal stub — prevents crash when Supabase env vars are not configured
+function createMockClient(): any {
+  const mockQuery: any = {
+    select: () => mockQuery,
+    insert: () => mockQuery,
+    update: () => mockQuery,
+    delete: () => mockQuery,
+    upsert: () => mockQuery,
+    limit: () => Promise.resolve({ data: [], error: null }),
+    order: () => Promise.resolve({ data: [], error: null }),
+    then: (resolve: (v: { data: unknown[]; error: null }) => void) =>
+      Promise.resolve({ data: [], error: null }).then(resolve),
+  };
+  const auth = {
+    getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+    onAuthStateChange: (_ev: unknown, _cb: unknown) => ({
+      data: { subscription: { unsubscribe: () => {} } },
+    }),
+    signInWithPassword: () =>
+      Promise.resolve({ data: { user: null, session: null }, error: { message: 'Supabase not configured — running in demo mode.' } }),
+    signUp: () =>
+      Promise.resolve({ data: { user: null, session: null }, error: { message: 'Supabase not configured — running in demo mode.' } }),
+    signOut: () => Promise.resolve({ error: null }),
+  };
+  const storage = {
+    from: () => ({
+      upload: () => Promise.resolve({ data: null, error: null }),
+      createSignedUrl: () => Promise.resolve({ data: { signedUrl: '' }, error: null }),
+      remove: () => Promise.resolve({ data: null, error: null }),
+    })
+  };
+  return { from: () => mockQuery, auth, storage } as any;
+}
 
-function createSupabaseClient() {
-  // Use import.meta.env for client-side (Vite build-time replacement)
-  // Fall back to process.env for SSR (server-side rendering)
-  const SUPABASE_URL = import.meta.env['VITE_SUPABASE_URL'] || process.env['SUPABASE_URL'];
-  const SUPABASE_PUBLISHABLE_KEY = import.meta.env['VITE_SUPABASE_PUBLISHABLE_KEY'] || process.env['SUPABASE_PUBLISHABLE_KEY'];
+function createSupabaseClient(): any {
+  const SUPABASE_URL = import.meta.env['VITE_SUPABASE_URL'] || (typeof process !== 'undefined' ? process.env['SUPABASE_URL'] : undefined);
+  const SUPABASE_PUBLISHABLE_KEY = import.meta.env['VITE_SUPABASE_PUBLISHABLE_KEY'] || (typeof process !== 'undefined' ? process.env['SUPABASE_PUBLISHABLE_KEY'] : undefined);
 
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-    const missing = [
-      ...(!SUPABASE_URL ? ['SUPABASE_URL'] : []),
-      ...(!SUPABASE_PUBLISHABLE_KEY ? ['SUPABASE_PUBLISHABLE_KEY'] : []),
-    ];
-    const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`;
-    console.error(`[Supabase] ${message}`);
-    throw new Error(message);
+    console.warn('[Supabase] Missing env vars — running in demo mode. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to enable live auth.');
+    return createMockClient();
   }
 
   return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
@@ -84,4 +105,3 @@ export const supabase = new Proxy({} as ReturnType<typeof createSupabaseClient>,
     return Reflect.get(_supabase, prop, receiver);
   },
 });
-
