@@ -58,6 +58,16 @@ class CameraWorker:
         self.collecting_post_event = False
         self.post_event_target_frames = 0
         self.pending_event_data: Optional[Dict[str, Any]] = None
+        self.cap: Optional[cv2.VideoCapture] = None
+        self.blur_faces = False
+        try:
+            cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+            if os.path.exists(cascade_path):
+                self.face_cascade = cv2.CascadeClassifier(cascade_path)
+            else:
+                self.face_cascade = None
+        except Exception:
+            self.face_cascade = None
 
     def start(self):
         if not self.is_running:
@@ -67,8 +77,38 @@ class CameraWorker:
 
     def stop(self):
         self.is_running = False
+        if hasattr(self, "cap") and self.cap:
+            try:
+                self.cap.release()
+            except Exception:
+                pass
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=2.0)
+
+    def _blur_faces(self, frame: np.ndarray) -> np.ndarray:
+        if self.face_cascade is None or frame is None:
+            return frame
+        try:
+            h, w = frame.shape[:2]
+            scale = 0.5
+            small = cv2.resize(frame, (int(w * scale), int(h * scale)))
+            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+            faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=3, minSize=(20, 20))
+            out_frame = frame.copy()
+            for (fx, fy, fw, fh) in faces:
+                x1 = max(0, int(fx / scale))
+                y1 = max(0, int(fy / scale))
+                x2 = min(w, int((fx + fw) / scale))
+                y2 = min(h, int((fy + fh) / scale))
+                if x2 > x1 and y2 > y1:
+                    roi = out_frame[y1:y2, x1:x2]
+                    kw = max(15, (roi.shape[1] // 2) | 1)
+                    kh = max(15, (roi.shape[0] // 2) | 1)
+                    blurred = cv2.GaussianBlur(roi, (kw, kh), 25)
+                    out_frame[y1:y2, x1:x2] = blurred
+            return out_frame
+        except Exception:
+            return frame
 
     def get_status_dict(self) -> Dict[str, Any]:
         return {
@@ -95,6 +135,7 @@ class CameraWorker:
                 continue
 
             cap = cv2.VideoCapture(self.video_source)
+            self.cap = cap
             if not cap.isOpened():
                 self.status = "ERROR"
                 time.sleep(2.0)
@@ -128,8 +169,9 @@ class CameraWorker:
                 # Store rolling frame
                 with self.buffer_lock:
                     self.rolling_frames.append(frame.copy())
-                    # Encode current frame for MJPEG live streaming
-                    ret_enc, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+                    # Encode current frame for MJPEG live streaming (with blur if enabled)
+                    display_frame = self._blur_faces(frame) if self.blur_faces else frame
+                    ret_enc, buffer = cv2.imencode(".jpg", display_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
                     if ret_enc:
                         self.latest_jpeg = buffer.tobytes()
 

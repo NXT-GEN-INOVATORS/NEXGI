@@ -1,7 +1,18 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { X, Image as ImageIcon, Film, Download, ShieldAlert, Clock, Camera, ExternalLink, Loader2, AlertCircle } from "lucide-react";
+import {
+  X,
+  Image as ImageIcon,
+  Film,
+  Download,
+  ShieldAlert,
+  Clock,
+  Camera,
+  ExternalLink,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
 import { EventData } from "./RecentEvents";
 
 interface EvidenceModalProps {
@@ -51,11 +62,10 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({
 
   if (!currentEvent) return null;
 
-  // Resolve media URLs: use relative same-origin paths so Next.js proxies cleanly without CORS or IPv6/IPv4 mismatches
+  // Resolve media URLs
   const getMediaUrl = (path?: string | null) => {
     if (!path) return null;
     if (path.startsWith("http://") || path.startsWith("https://")) {
-      // Strip any hardcoded backend host to force same-origin proxy
       try {
         const url = new URL(path);
         return url.pathname;
@@ -71,24 +81,24 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({
   const confPercent = Math.round(currentEvent.confidence * 100);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 backdrop-blur-xs animate-in fade-in duration-150">
+      <div className="relative w-full max-w-4xl rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 bg-slate-950 border-b border-slate-800">
+        <div className="flex items-center justify-between px-6 py-4 bg-slate-50/70 border-b border-slate-100">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400">
+            <div className="p-2 rounded-xl bg-red-50 border border-red-200 text-red-600">
               <ShieldAlert className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <h3 className="text-base font-bold text-white tracking-wide uppercase">
+                <h3 className="text-base font-bold text-slate-800 tracking-wide uppercase">
                   Incident Evidence: {currentEvent.camera_id}
                 </h3>
-                <span className="px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-300 font-mono text-xs font-bold border border-red-500/40">
+                <span className="px-2.5 py-0.5 rounded-full bg-red-50 text-red-600 font-mono text-xs font-bold border border-red-200">
                   {confPercent}% Violence Confirmed
                 </span>
               </div>
-              <p className="text-xs text-slate-400 font-mono mt-0.5">
+              <p className="text-xs text-slate-500 font-mono mt-0.5">
                 Event ID: {currentEvent.id} • Detected at {currentEvent.detection_timestamp}
               </p>
             </div>
@@ -96,21 +106,21 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({
 
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Media Selector Tabs & Actions */}
-        <div className="flex items-center justify-between px-6 py-2.5 bg-slate-950/60 border-b border-slate-800 text-xs">
+        <div className="flex items-center justify-between px-6 py-2.5 bg-white border-b border-slate-100 text-xs">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setActiveTab("image")}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold transition ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-semibold transition cursor-pointer ${
                 activeTab === "image"
-                  ? "bg-blue-600 text-white shadow-sm shadow-blue-500/20"
-                  : "bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white"
+                  ? "bg-blue-600 text-white shadow-xs"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
               }`}
             >
               <ImageIcon className="w-3.5 h-3.5" />
@@ -119,10 +129,10 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({
 
             <button
               onClick={() => setActiveTab("clip")}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold transition ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-semibold transition cursor-pointer ${
                 activeTab === "clip"
-                  ? "bg-red-600 text-white shadow-sm shadow-red-500/20"
-                  : "bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white"
+                  ? "bg-red-600 text-white shadow-xs"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
               }`}
             >
               <Film className="w-3.5 h-3.5" />
@@ -140,15 +150,15 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({
                   href={imageUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-400 transition"
+                  className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 transition"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Open Full JPG</span>
+                  <span>Open JPG</span>
                 </a>
                 <a
                   href={imageUrl}
                   download={`evidence_${currentEvent.camera_id}_${currentEvent.id}.jpg`}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 transition"
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs text-slate-700 font-semibold border border-slate-200 transition"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Download JPG</span>
@@ -162,15 +172,15 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({
                   href={clipUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-red-400 transition"
+                  className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-red-600 transition"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Open Full MP4</span>
+                  <span>Open MP4</span>
                 </a>
                 <a
                   href={clipUrl}
                   download={`clip_${currentEvent.camera_id}_${currentEvent.id}.mp4`}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 transition"
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs text-slate-700 font-semibold border border-slate-200 transition"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Download MP4</span>
@@ -208,7 +218,9 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({
                   />
                 )
               ) : (
-                <div className="text-xs text-slate-500 py-16">No evidence snapshot captured for this event.</div>
+                <div className="text-xs text-slate-400 py-16">
+                  No evidence snapshot captured for this event.
+                </div>
               )}
             </div>
           )}
@@ -269,26 +281,26 @@ export const EvidenceModal: React.FC<EvidenceModalProps> = ({
           )}
         </div>
 
-        {/* Modal Footer with Verification Proof */}
-        <div className="px-6 py-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs">
-          <div className="flex items-center gap-5 text-slate-400 font-mono">
+        {/* Modal Footer */}
+        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-5 text-slate-500 font-mono">
             <span className="flex items-center gap-1.5">
-              <Camera className="w-3.5 h-3.5 text-slate-500" />
+              <Camera className="w-3.5 h-3.5 text-slate-400" />
               {currentEvent.camera_id}
             </span>
             <span className="flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-slate-500" />
+              <Clock className="w-3.5 h-3.5 text-slate-400" />
               {currentEvent.detection_timestamp}
             </span>
-            <span className="text-emerald-400 font-semibold flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            <span className="text-emerald-600 font-semibold flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               Pretrained MoViNet-A0 Verified
             </span>
           </div>
 
           <button
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition"
+            className="px-4 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold border border-slate-200 transition cursor-pointer"
           >
             Close Viewer
           </button>

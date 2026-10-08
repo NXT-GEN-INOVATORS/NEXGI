@@ -8,11 +8,11 @@ const nextConfig = {
     return [
       {
         source: '/evidence/:path*',
-        destination: 'http://127.0.0.1:8001/evidence/:path*',
+        destination: 'http://127.0.0.1:8002/evidence/:path*',
       },
       {
         source: '/clips/:path*',
-        destination: 'http://127.0.0.1:8001/clips/:path*',
+        destination: 'http://127.0.0.1:8002/clips/:path*',
       },
     ];
   },
