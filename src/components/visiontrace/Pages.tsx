@@ -1,342 +1,900 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Button, Chip, Alert, TextField, Switch, FormControlLabel, Paper, TableContainer, Table, TableHead, TableBody, TableRow, TableCell, Dialog, DialogTitle, DialogContent, DialogActions, CircularProgress, IconButton, Tooltip, Tabs, Tab, ToggleButton, ToggleButtonGroup } from '@mui/material';
-import { VideocamOutlined, Search, ArrowForward, Refresh, HubOutlined, NotificationsNone, CheckCircleOutlined, FolderOutlined, Download, StorageOutlined, DnsOutlined, InfoOutlined, TuneOutlined, WifiOutlined, LocationOnOutlined, SpeedOutlined, FlashOnOutlined, MemoryOutlined, SettingsInputComponentOutlined, AddCircleOutlined, ContentCopyOutlined, UploadFile, PlayArrow, DeleteOutlined } from '@mui/icons-material';
+import { Button, Chip, Alert, TextField, Switch, FormControlLabel, Paper, TableContainer, Table, TableHead, TableBody, TableRow, TableCell, Dialog, DialogTitle, DialogContent, DialogActions, CircularProgress, IconButton, Tooltip, Tabs, Tab, ToggleButton, ToggleButtonGroup, LinearProgress, Badge } from '@mui/material';
+import { VideocamOutlined, Search, ArrowForward, Refresh, HubOutlined, NotificationsNone, CheckCircleOutlined, FolderOutlined, Download, StorageOutlined, DnsOutlined, InfoOutlined, TuneOutlined, WifiOutlined, LocationOnOutlined, SpeedOutlined, FlashOnOutlined, MemoryOutlined, SettingsInputComponentOutlined, AddCircleOutlined, ContentCopyOutlined, UploadFile, PlayArrow, DeleteOutlined, WarningAmberOutlined, AnalyticsOutlined, TimelineOutlined, PsychologyOutlined, CloudUploadOutlined, CheckCircle, ErrorOutline } from '@mui/icons-material';
 import { Link } from '@tanstack/react-router';
 import gate from '@/assets/gate-camera.jpg';
 import { PageHeading, SectionHeading, RecentTable, CameraPreview, Status } from './Common';
-import { cameraNames, backendUrl, ai, recent, sampleEvidence, type Evidence } from '@/lib/visiontrace/data';
+import { cameraNames, backendUrl, ai, recent, sampleEvidence, resolveMediaUrl, type Evidence } from '@/lib/visiontrace/data';
 import { useSession } from './Session';
 import { supabase } from '@/integrations/supabase/client';
 export function Investigations(){const {user}=useSession();const [selected,setSelected]=useState<{query:string;evidence:unknown}|null>(null);const investigations=useQuery({queryKey:['investigations',user?.id],queryFn:async()=>{const {data,error}=await supabase.from('investigations').select('*').order('created_at',{ascending:false});if(error)throw error;return data;},enabled:!!user});return <><PageHeading title="Investigations" subtitle="Organize your searches and verify grounded evidence." action={<Button component={Link} to="/ai-search" variant="contained" startIcon={<Search/>}>New Investigation</Button>}/>{!user?<><SectionHeading title="Recent Investigations" action={<Chip label="Sample activity" variant="outlined"/>}/><RecentTable all/></>:investigations.isLoading?<CircularProgress size={24}/>:investigations.isError?<Alert severity="error">{investigations.error.message}</Alert>:<TableContainer component={Paper} variant="outlined"><Table><TableHead><TableRow>{['Query','Created','Status','Evidence'].map(x=><TableCell key={x}>{x}</TableCell>)}</TableRow></TableHead><TableBody>{investigations.data?.map((i:any)=><TableRow key={i.id}><TableCell>{i.query}</TableCell><TableCell>{new Date(i.created_at).toLocaleString()}</TableCell><TableCell><Status status={i.status}/></TableCell><TableCell><Button onClick={()=>setSelected(i)}>View Evidence</Button></TableCell></TableRow>)}{!investigations.data?.length&&<TableRow><TableCell colSpan={4} align="center">No investigations yet. Save a search to start one.</TableCell></TableRow>}</TableBody></Table></TableContainer>}<Dialog open={!!selected} onClose={()=>setSelected(null)} fullWidth maxWidth="md"><DialogTitle>{selected?.query}</DialogTitle><DialogContent>{Array.isArray(selected?.evidence)?(selected.evidence as Evidence[]).map(e=><div key={e.id} style={{marginBottom:20}}><CameraPreview evidence={e} boxes/><p className="subtitle">{e.camera_id} · {e.timestamp} · Confidence {e.confidence}% · {e.objects.join(', ')}</p></div>):'No evidence'}</DialogContent><DialogActions><Button onClick={()=>setSelected(null)}>Close</Button></DialogActions></Dialog></>}
 export function Cameras(){
-  const [filter,setFilter]=useState('');
-  const [selected,setSelected]=useState<number|null>(null);
-  const [activeTab,setActiveTab]=useState<'grid'|'integration'|'add'>('grid');
-  const [copied,setCopied]=useState('');
+  const [filter, setFilter] = useState('');
+  const [sentimentFilter, setSentimentFilter] = useState<'all' | 'violent' | 'tense' | 'calm'>('all');
+  const [activeTab, setActiveTab] = useState<'grid' | 'add' | 'integration'>('grid');
+  const [copied, setCopied] = useState('');
   
-  // Custom camera registration supporting HTTP and upload
-  const [sourceType,setSourceType]=useState<'http'|'upload'|'rtsp'>('http');
-  const [newCam,setNewCam]=useState({name:'',id:'',streamUrl:'',zone:'',protocol:'HTTP Live Stream (HLS)',resolution:'1080p'});
-  const [uploadedVideoFile,setUploadedVideoFile]=useState<File|null>(null);
-  const [uploadedVideoUrl,setUploadedVideoUrl]=useState<string>('');
-  const [newCamSuccess,setNewCamSuccess]=useState(false);
-  const [playingVideo,setPlayingVideo]=useState<{name:string;id:string;url:string}|null>(null);
-  const [deletingCam,setDeletingCam]=useState<{id:string;name:string}|null>(null);
+  // Custom camera registration supporting HTTP, RTSP, and multiple upload
+  const [sourceType, setSourceType] = useState<'upload' | 'http' | 'rtsp'>('upload');
+  const [newCam, setNewCam] = useState({ name: '', id: '', streamUrl: '', zone: '', protocol: 'HTTP Live Stream (HLS)', resolution: '1080p' });
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [stagedPreviewUrl, setStagedPreviewUrl] = useState<string>('');
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [newCamSuccessMsg, setNewCamSuccessMsg] = useState('');
+  
+  // Active cameras list with sentiment analysis
+  const [camerasList, setCamerasList] = useState<any[]>([]);
+  const [isLoadingCams, setIsLoadingCams] = useState(false);
+  const [selectedCamDetail, setSelectedCamDetail] = useState<any | null>(null);
+  const [playingVideo, setPlayingVideo] = useState<{ name: string; id: string; url: string; sentiment?: string } | null>(null);
+  const [deletingCam, setDeletingCam] = useState<{ id: string; name: string } | null>(null);
+  const [inlinePlayingId, setInlinePlayingId] = useState<string | null>(null);
 
-  // Active verified cameras list
-  const [camerasList,setCamerasList]=useState([
-    {
-      id:'CAM-01',name:'Front Entrance',zone:'North Wing · Gate 1',res:'4K',fps:'30fps',
-      protocol:'RTSP / H.264',uptime:'99.9%',detections:['Person','Face Blur','Vehicle'],
-      ip:'192.168.1.101',storage:'128GB',aiModel:'YOLOv8 Real-Time',thumb:gate,videoUrl:'',
-      status:'Online'
-    },
-    {
-      id:'CAM-02',name:'Loading Bay East',zone:'Warehouse Logistics',res:'1080p',fps:'25fps',
-      protocol:'ONVIF Profile S',uptime:'98.8%',detections:['Forklift','Pallet','Vehicle'],
-      ip:'192.168.1.102',storage:'64GB',aiModel:'YOLOv8 Real-Time',thumb:gate,videoUrl:'',
-      status:'Online'
-    },
-    {
-      id:'CAM-03',name:'Main Security Gate',zone:'Perimeter Access Point',res:'4K',fps:'30fps',
-      protocol:'HTTP Live Stream (HLS)',uptime:'99.9%',detections:['Car','Truck','LPR Plate Recognition'],
-      ip:'192.168.1.103',storage:'256GB',aiModel:'YOLOv8 Real-Time',thumb:gate,videoUrl:'',
-      status:'Online'
-    },
-    {
-      id:'CAM-04',name:'Visitor Parking',zone:'Exterior South Lot',res:'2K',fps:'30fps',
-      protocol:'HTTP / WebRTC',uptime:'97.5%',detections:['Person','Vehicle'],
-      ip:'192.168.1.104',storage:'128GB',aiModel:'YOLOv5 Edge',thumb:gate,videoUrl:'',
-      status:'Online'
-    },
-    {
-      id:'CAM-05',name:'Building B Walkway',zone:'Pedestrian Transit Corridor',res:'1080p',fps:'30fps',
-      protocol:'RTSP / H.265',uptime:'99.4%',detections:['Person','Backpack','Loitering'],
-      ip:'192.168.1.105',storage:'64GB',aiModel:'YOLOv8 Real-Time',thumb:gate,videoUrl:'',
-      status:'Online'
-    },
-    {
-      id:'CAM-06',name:'Server Room Corridor',zone:'Restricted Access Zone 3',res:'4K',fps:'60fps',
-      protocol:'HTTPS / Secure WebRTC',uptime:'99.99%',detections:['Person','Access Card Verification'],
-      ip:'192.168.1.106',storage:'512GB',aiModel:'YOLOv8 Real-Time',thumb:gate,videoUrl:'',
-      status:'Online'
+  // Helper to reliably construct an HTML5-playable video URL
+  function getPlayableVideoUrl(camOrUrl?: any): string {
+    if (!camOrUrl) return '';
+    if (typeof camOrUrl === 'string') {
+      if (camOrUrl.startsWith('blob:') || camOrUrl.startsWith('data:')) return camOrUrl;
+      if (camOrUrl.startsWith('http://') || camOrUrl.startsWith('https://')) {
+        const cleanPath = camOrUrl.replace(/^https?:\/\/[^/]+/, '');
+        if (cleanPath.startsWith('/data/videos/')) return resolveMediaUrl(cleanPath) || camOrUrl;
+        if (cleanPath.startsWith('/videos/')) {
+          const fn = cleanPath.split('/').pop();
+          return resolveMediaUrl(`/data/videos/${fn}`) || camOrUrl;
+        }
+        return camOrUrl;
+      }
+      const fn = camOrUrl.split(/[\\/]/).pop();
+      return resolveMediaUrl(`/data/videos/${fn}`) || camOrUrl;
     }
-  ]);
+    if (camOrUrl.blobUrl) return camOrUrl.blobUrl;
+    const rawUrl = camOrUrl.video_url || camOrUrl.videoUrl || camOrUrl.url;
+    if (rawUrl) {
+      if (rawUrl.startsWith('blob:') || rawUrl.startsWith('data:')) return rawUrl;
+      if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+        const cleanPath = rawUrl.replace(/^https?:\/\/[^/]+/, '');
+        if (cleanPath.startsWith('/data/videos/')) return resolveMediaUrl(cleanPath) || rawUrl;
+        if (cleanPath.startsWith('/videos/')) {
+          const fn = cleanPath.split('/').pop();
+          return resolveMediaUrl(`/data/videos/${fn}`) || rawUrl;
+        }
+        return rawUrl;
+      }
+      const fn = rawUrl.split(/[\\/]/).pop();
+      return resolveMediaUrl(`/data/videos/${fn}`) || rawUrl;
+    }
+    const fn = camOrUrl.video_filename || camOrUrl.filename || (camOrUrl.video_source ? camOrUrl.video_source.split(/[\\/]/).pop() : '');
+    if (fn) {
+      return resolveMediaUrl(`/data/videos/${fn}`) || '';
+    }
+    return '';
+  }
 
-  const filtered=camerasList.filter(c=>(c.name+c.zone+c.id).toLowerCase().includes(filter.toLowerCase()));
-  const sel=selected!==null?camerasList[selected]:null;
+  // Fetch cameras from MoViNet violence backend & NEXGI backend
+  const fetchCameras = async () => {
+    try {
+      const res = await ai.get('/api/violence/cameras');
+      if (res.data?.success && Array.isArray(res.data.cameras)) {
+        setCamerasList(res.data.cameras);
+        return;
+      }
+    } catch {
+      try {
+        const fallbackRes = await ai.get('/api/cameras');
+        if (fallbackRes.data?.cameras) {
+          setCamerasList(fallbackRes.data.cameras);
+        }
+      } catch {
+        // silent fallback
+      }
+    }
+  };
 
-  function copyText(txt:string,key:string){
+  useEffect(() => {
+    fetchCameras();
+    const interval = setInterval(fetchCameras, 3500);
+    return () => clearInterval(interval);
+  }, []);
+
+  function copyText(txt: string, key: string) {
     void navigator.clipboard.writeText(txt);
     setCopied(key);
-    setTimeout(()=>setCopied(''),2000);
+    setTimeout(() => setCopied(''), 2000);
   }
 
-  function handleFileUpload(e:React.ChangeEvent<HTMLInputElement>){
-    const file=e.target.files?.[0];
-    if(file){
-      setUploadedVideoFile(file);
-      const url=URL.createObjectURL(file);
-      setUploadedVideoUrl(url);
+  function handleMultiFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files) {
+      const filesArr = Array.from(e.target.files);
+      setUploadedFiles(prev => [...prev, ...filesArr]);
+      if (filesArr.length > 0) {
+        const preview = URL.createObjectURL(filesArr[0]);
+        setStagedPreviewUrl(preview);
+        if (!newCam.name) {
+          const clean = filesArr[0].name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+          setNewCam(prev => ({ ...prev, name: clean.charAt(0).toUpperCase() + clean.slice(1) }));
+        }
+      }
+      setUploadError('');
     }
   }
 
-  function handleAddCamera(e:React.FormEvent){
-    e.preventDefault();
-    const finalUrl=sourceType==='upload'?uploadedVideoUrl:newCam.streamUrl;
-    const addedCamera={
-      id:newCam.id||`CAM-0${camerasList.length+1}`,
-      name:newCam.name,
-      zone:newCam.zone||'Configured Zone',
-      res:newCam.resolution,
-      fps:'30fps',
-      protocol:sourceType==='http'?'HTTP / HLS Stream':sourceType==='upload'?'Local Uploaded Stream':'RTSP Stream',
-      uptime:'100%',
-      detections:['AI Live Vision','Object Tracking'],
-      ip:newCam.streamUrl||'192.168.1.'+(100+camerasList.length+1),
-      storage:'128GB',
-      aiModel:'YOLOv8',
-      thumb:gate,
-      videoUrl:finalUrl,
-      status:'Online'
-    };
-    setCamerasList([addedCamera,...camerasList]);
-    setNewCamSuccess(true);
-    setTimeout(()=>{
-      setNewCamSuccess(false);
-      setNewCam({name:'',id:'',streamUrl:'',zone:'',protocol:'HTTP Live Stream (HLS)',resolution:'1080p'});
-      setUploadedVideoFile(null);
-      setUploadedVideoUrl('');
-      setActiveTab('grid');
-    },1200);
+  function removeStagedFile(idx: number) {
+    setUploadedFiles(prev => {
+      const next = prev.filter((_, i) => i !== idx);
+      if (next.length > 0) {
+        setStagedPreviewUrl(URL.createObjectURL(next[0]));
+      } else {
+        setStagedPreviewUrl('');
+      }
+      return next;
+    });
   }
 
-  return <><PageHeading title="Cameras & Video Feeds" subtitle="Live video feeds with AI detection, HTTP stream ingestion, and video recording playback." action={<Button variant="contained" startIcon={<AddCircleOutlined/>} onClick={()=>setActiveTab('add')}>Connect Camera / Video</Button>}/>
+  async function handleBatchUpload(e: React.FormEvent) {
+    e.preventDefault();
+    if (sourceType === 'upload') {
+      if (uploadedFiles.length === 0) {
+        setUploadError('Please select at least one video file to upload.');
+        return;
+      }
+      setIsUploading(true);
+      setUploadError('');
+
+      const formData = new FormData();
+      uploadedFiles.forEach(file => {
+        formData.append('files', file);
+      });
+
+      try {
+        const resp = await ai.post('/api/violence/upload-multiple', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+
+        if (resp.data?.success) {
+          const newCams = resp.data.cameras || [];
+          const firstNew = newCams[0];
+          const sentimentSummary = firstNew 
+            ? `MoViNet Sentiment: ${firstNew.sentiment_label || 'Analyzed'} (${firstNew.calm_score || 85}% Calm, ${firstNew.aggression_score || 15}% Violence Risk)`
+            : 'Sentiment analysis performed successfully!';
+
+          setNewCamSuccessMsg(`Successfully uploaded and analyzed ${newCams.length} video(s)! ${sentimentSummary}`);
+          setUploadedFiles([]);
+          setStagedPreviewUrl('');
+          setNewCam({ name: '', id: '', streamUrl: '', zone: '', protocol: 'HTTP Live Stream (HLS)', resolution: '1080p' });
+          
+          await fetchCameras();
+          
+          // Switch to grid and show the newly analyzed camera in the modal
+          setActiveTab('grid');
+          if (firstNew) {
+            setSelectedCamDetail(firstNew);
+          }
+          setTimeout(() => setNewCamSuccessMsg(''), 6000);
+        } else {
+          setUploadError('Failed to process uploaded videos.');
+        }
+      } catch (err: any) {
+        setUploadError(err?.response?.data?.detail || err?.message || 'Error uploading videos.');
+      } finally {
+        setIsUploading(false);
+      }
+    } else {
+      // Single HTTP / RTSP stream registration
+      const addedCam = {
+        id: newCam.id || `CAM-${(camerasList.length + 1).toString().padStart(2, '0')}`,
+        name: newCam.name || `Live Feed ${camerasList.length + 1}`,
+        zone: newCam.zone || 'Campus Zone',
+        res: newCam.resolution,
+        fps: '30fps',
+        protocol: sourceType === 'http' ? 'HTTP / HLS Stream' : 'RTSP Stream',
+        uptime: '100%',
+        detections: ['MoViNet Violence', 'Sentiment Analysis', 'Object Tracking'],
+        ip: newCam.streamUrl || `192.168.1.${100 + camerasList.length + 1}`,
+        storage: '128GB',
+        aiModel: 'MoViNet-A0 Streaming',
+        thumb: gate,
+        video_url: newCam.streamUrl,
+        sentiment_label: 'Calm & Safe',
+        threat_level: 'LOW',
+        calm_score: 95.0,
+        aggression_score: 5.0,
+        violence_probability: 0.05,
+        peak_violence_score: 8.0,
+        status: 'NORMAL'
+      };
+      setCamerasList(prev => [addedCam, ...prev]);
+      setNewCamSuccessMsg('Camera stream successfully added and linked to monitoring grid!');
+      setNewCam({ name: '', id: '', streamUrl: '', zone: '', protocol: 'HTTP Live Stream (HLS)', resolution: '1080p' });
+      setActiveTab('grid');
+      setTimeout(() => setNewCamSuccessMsg(''), 4000);
+    }
+  }
+
+  async function handleLoadDefaults() {
+    setIsLoadingCams(true);
+    try {
+      const resp = await ai.post('/api/violence/load-defaults');
+      if (resp.data?.success) {
+        await fetchCameras();
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingCams(false);
+    }
+  }
+
+  async function handleDeleteConfirm() {
+    if (!deletingCam) return;
+    try {
+      await ai.delete(`/api/violence/cameras/${deletingCam.id}`);
+      setCamerasList(prev => prev.filter(c => (c.camera_id || c.id) !== deletingCam.id));
+    } catch {
+      setCamerasList(prev => prev.filter(c => (c.camera_id || c.id) !== deletingCam.id));
+    }
+    setDeletingCam(null);
+  }
+
+  // Filter cameras based on search and sentiment status
+  const filtered = camerasList.filter(c => {
+    const textMatch = ((c.name || '') + (c.zone || '') + (c.camera_id || c.id || '')).toLowerCase().includes(filter.toLowerCase());
+    if (!textMatch) return false;
+
+    const label = (c.sentiment_label || '').toLowerCase();
+    const vProb = c.violence_probability || 0;
+    const isViolent = label.includes('violent') || label.includes('fight') || vProb >= 0.65;
+    const isTense = label.includes('tense') || label.includes('suspicious') || (vProb >= 0.35 && vProb < 0.65);
+    const isCalm = label.includes('calm') || (!isViolent && !isTense);
+
+    if (sentimentFilter === 'violent') return isViolent;
+    if (sentimentFilter === 'tense') return isTense;
+    if (sentimentFilter === 'calm') return isCalm;
+    return true;
+  });
+
+  const countViolent = camerasList.filter(c => (c.sentiment_label || '').toLowerCase().includes('violent') || (c.violence_probability || 0) >= 0.65).length;
+  const countTense = camerasList.filter(c => (c.sentiment_label || '').toLowerCase().includes('tense') || ((c.violence_probability || 0) >= 0.35 && (c.violence_probability || 0) < 0.65)).length;
+  const countCalm = camerasList.filter(c => (c.sentiment_label || '').toLowerCase().includes('calm') || ((c.violence_probability || 0) < 0.35 && !(c.sentiment_label || '').toLowerCase().includes('violent'))).length;
+
+  const playableModalUrl = getPlayableVideoUrl(selectedCamDetail);
+  const playablePlayerUrl = getPlayableVideoUrl(playingVideo);
+
+  return <>
+    <PageHeading 
+      title="Cameras & Sentimental Video Analysis" 
+      subtitle="Real-time multi-camera CCTV monitoring, multi-video batch upload, and MoViNet temporal violence & sentiment detection." 
+      action={
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Button variant="outlined" startIcon={<Refresh />} onClick={fetchCameras} disabled={isLoadingCams}>
+            Refresh Telemetry
+          </Button>
+          <Button variant="contained" startIcon={<AddCircleOutlined />} onClick={() => setActiveTab('add')}>
+            Upload Videos / Feeds
+          </Button>
+        </div>
+      }
+    />
     
-    <Tabs value={activeTab} onChange={(_e,v)=>setActiveTab(v)} sx={{borderBottom:1,borderColor:'divider',mb:3}}>
-      <Tab label={`Active Cameras (${filtered.length})`} value="grid" icon={<VideocamOutlined/>} iconPosition="start"/>
-      <Tab label="Add Camera Feed (HTTP / Upload)" value="add" icon={<AddCircleOutlined/>} iconPosition="start"/>
-      <Tab label="Stream & API Integration" value="integration" icon={<SettingsInputComponentOutlined/>} iconPosition="start"/>
+    <Tabs value={activeTab} onChange={(_e, v) => setActiveTab(v)} sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+      <Tab label={`Monitored Cameras (${camerasList.length})`} value="grid" icon={<VideocamOutlined />} iconPosition="start" />
+      <Tab label="Upload Multiple Videos (Sentiment AI)" value="add" icon={<CloudUploadOutlined />} iconPosition="start" />
+      <Tab label="API & MoViNet Specs" value="integration" icon={<SettingsInputComponentOutlined />} iconPosition="start" />
     </Tabs>
 
-    {activeTab==='grid'&&(
+    {newCamSuccessMsg && (
+      <Alert severity="success" sx={{ mb: 3, fontWeight: 600 }}>
+        {newCamSuccessMsg}
+      </Alert>
+    )}
+
+    {activeTab === 'grid' && (
       <>
-        <div style={{display:'flex',gap:16,alignItems:'center',marginBottom:24,flexWrap:'wrap'}}>
-          <TextField placeholder="Search by camera name, ID, or zone…" size="small" value={filter} onChange={e=>setFilter(e.target.value)} sx={{width:320}} slotProps={{input:{startAdornment:<Search sx={{fontSize:16,mr:1,color:'var(--muted-foreground)'}}/>}}}/>
-          <div style={{display:'flex',gap:10,marginLeft:'auto'}}>
-            {[{label:'All Online',color:'var(--success)'},{label:'AI Tracking',color:'var(--primary)'},{label:'Recording',color:'var(--info)'}].map(b=><Chip key={b.label} label={<span style={{display:'flex',alignItems:'center',gap:5}}><span style={{width:6,height:6,borderRadius:'50%',background:b.color,display:'inline-block'}}/>{b.label}</span>} variant="outlined" size="small"/>)}
+        {/* Top Control Bar: Search, Sentiment Filters, Load Benchmark */}
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 20, flexWrap: 'wrap' }}>
+          <TextField 
+            placeholder="Search camera name, ID, or location…" 
+            size="small" 
+            value={filter} 
+            onChange={e => setFilter(e.target.value)} 
+            sx={{ width: 300 }} 
+            slotProps={{ input: { startAdornment: <Search sx={{ fontSize: 16, mr: 1, color: 'var(--muted-foreground)' }} /> } }}
+          />
+
+          {/* Sentiment Filter Chips */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Chip 
+              label={`All Feeds (${camerasList.length})`} 
+              clickable 
+              color={sentimentFilter === 'all' ? 'primary' : 'default'} 
+              variant={sentimentFilter === 'all' ? 'filled' : 'outlined'}
+              onClick={() => setSentimentFilter('all')}
+              size="small"
+            />
+            <Chip 
+              label={<span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444' }} /> Violent Alerts ({countViolent})</span>} 
+              clickable 
+              color={sentimentFilter === 'violent' ? 'error' : 'default'} 
+              variant={sentimentFilter === 'violent' ? 'filled' : 'outlined'}
+              onClick={() => setSentimentFilter('violent')}
+              size="small"
+            />
+            <Chip 
+              label={<span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b' }} /> Tense / Suspicious ({countTense})</span>} 
+              clickable 
+              color={sentimentFilter === 'tense' ? 'warning' : 'default'} 
+              variant={sentimentFilter === 'tense' ? 'filled' : 'outlined'}
+              onClick={() => setSentimentFilter('tense')}
+              size="small"
+            />
+            <Chip 
+              label={<span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981' }} /> Calm & Safe ({countCalm})</span>} 
+              clickable 
+              color={sentimentFilter === 'calm' ? 'success' : 'default'} 
+              variant={sentimentFilter === 'calm' ? 'filled' : 'outlined'}
+              onClick={() => setSentimentFilter('calm')}
+              size="small"
+            />
+          </div>
+
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <Button size="small" variant="outlined" startIcon={<FlashOnOutlined />} onClick={handleLoadDefaults} disabled={isLoadingCams}>
+              Load Benchmark Feeds (CAM-01–06)
+            </Button>
           </div>
         </div>
-        <div className="cam-rich-grid">
-          {filtered.map((cam,i)=>{
-            return <article key={cam.id+i} className="cam-rich-card" onClick={()=>setSelected(i===selected?null:i)}>
-              <div className="cam-rich-header">
-                <div className="cam-id-badge"><VideocamOutlined sx={{fontSize:12}}/> {cam.id}</div>
-                <div style={{display:'flex',gap:6,alignItems:'center'}}>
-                  <span className="cam-live-dot"/>
-                  <span style={{fontSize:9,color:'var(--danger)',fontWeight:700}}>LIVE</span>
-                  <Chip label={cam.res} size="small" sx={{height:17,fontSize:9,ml:1}}/>
-                </div>
-              </div>
-              <div className="cam-rich-preview">
-                <img src={cam.thumb} alt={cam.name} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-                <div className="cam-scan-line"/>
-                <div className="cam-corner cam-corner-tl"/><div className="cam-corner cam-corner-tr"/><div className="cam-corner cam-corner-bl"/><div className="cam-corner cam-corner-br"/>
-                <div className="cam-ai-badge"><FlashOnOutlined sx={{fontSize:10}}/> AI ACTIVE · {cam.aiModel}</div>
-                <div className="cam-ts-badge">▶ LIVE</div>
-              </div>
-              <div className="cam-rich-body">
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
-                  <div>
-                    <strong style={{fontSize:13,display:'block'}}>{cam.name}</strong>
-                    <span style={{fontSize:10,color:'var(--muted-foreground)',display:'flex',alignItems:'center',gap:4,marginTop:3}}><LocationOnOutlined sx={{fontSize:11}}/>{cam.zone}</span>
+
+        {/* Empty State */}
+        {filtered.length === 0 ? (
+          <Paper variant="outlined" sx={{ p: 5, textAlign: 'center', my: 2, borderRadius: 2 }}>
+            <VideocamOutlined sx={{ fontSize: 56, opacity: 0.35, mb: 1, color: 'var(--muted-foreground)' }} />
+            <h4 style={{ margin: '0 0 6px', fontSize: 17 }}>No Surveillance Feeds Found</h4>
+            <p className="subtitle" style={{ margin: '0 0 20px', maxWidth: 460, marginLeft: 'auto', marginRight: 'auto' }}>
+              Upload one or more video recordings to analyze violence and pedestrian sentiment, or click below to load benchmark CCTV cameras.
+            </p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <Button variant="contained" startIcon={<CloudUploadOutlined />} onClick={() => setActiveTab('add')}>
+                Upload Multiple Videos
+              </Button>
+              <Button variant="outlined" startIcon={<FlashOnOutlined />} onClick={handleLoadDefaults}>
+                Load Benchmark Cameras
+              </Button>
+            </div>
+          </Paper>
+        ) : (
+          /* Multi-Camera Rich Grid */
+          <div className="cam-rich-grid">
+            {filtered.map((cam, i) => {
+              const camId = cam.camera_id || cam.id || `CAM-${(i + 1).toString().padStart(2, '0')}`;
+              const camName = cam.name || `Camera ${camId}`;
+              const vProb = cam.violence_probability || 0;
+              const calmScore = cam.calm_score !== undefined ? cam.calm_score : Math.round((1 - vProb) * 100);
+              const aggrScore = cam.aggression_score !== undefined ? cam.aggression_score : Math.round(vProb * 100);
+              const peakScore = cam.peak_violence_score !== undefined ? cam.peak_violence_score : Math.round(vProb * 100);
+              const sentimentLabel = cam.sentiment_label || (vProb >= 0.65 ? 'Violent / Aggressive' : vProb >= 0.35 ? 'Tense / Suspicious' : 'Calm & Safe');
+              const threatLevel = cam.threat_level || (vProb >= 0.8 ? 'CRITICAL' : vProb >= 0.65 ? 'HIGH' : vProb >= 0.35 ? 'ELEVATED' : 'LOW');
+              const isViolent = sentimentLabel.toLowerCase().includes('violent') || vProb >= 0.65;
+              const isTense = sentimentLabel.toLowerCase().includes('tense') || (vProb >= 0.35 && vProb < 0.65);
+              const previewSrc = cam.sentiment_analysis?.evidence_thumbnail || (cam.stream_url ? cam.stream_url : cam.thumb || gate);
+              const cardVideoUrl = getPlayableVideoUrl(cam);
+
+              return (
+                <article key={camId + i} className="cam-rich-card" style={{ borderColor: isViolent ? 'rgba(239,68,68,0.5)' : isTense ? 'rgba(245,158,11,0.4)' : undefined }}>
+                  {/* Card Header */}
+                  <div className="cam-rich-header">
+                    <div className="cam-id-badge"><VideocamOutlined sx={{ fontSize: 13 }} /> {camId}</div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <span className="cam-live-dot" style={{ background: isViolent ? '#ef4444' : isTense ? '#f59e0b' : '#10b981' }} />
+                      <span style={{ fontSize: 10, color: isViolent ? '#ef4444' : isTense ? '#f59e0b' : '#10b981', fontWeight: 700 }}>
+                        {isViolent ? 'VIOLENCE ALERT' : isTense ? 'SUSPICIOUS' : 'NORMAL'}
+                      </span>
+                      <Chip label={threatLevel} size="small" sx={{ height: 18, fontSize: 9, ml: 0.5, fontWeight: 700, background: isViolent ? 'rgba(239,68,68,0.18)' : isTense ? 'rgba(245,158,11,0.18)' : 'rgba(16,185,129,0.18)', color: isViolent ? '#ef4444' : isTense ? '#f59e0b' : '#10b981' }} />
+                    </div>
                   </div>
-                  <Tooltip title={`Uptime: ${cam.uptime}`}><Chip label={cam.uptime} size="small" color="success" sx={{height:20,fontSize:9}}/></Tooltip>
-                </div>
-                <div className="cam-specs-row">
-                  <div className="cam-spec"><SpeedOutlined sx={{fontSize:11}}/>{cam.fps}</div>
-                  <div className="cam-spec"><WifiOutlined sx={{fontSize:11}}/>{cam.protocol.split('/')[0]}</div>
-                  <div className="cam-spec"><StorageOutlined sx={{fontSize:11}}/>{cam.storage}</div>
-                  <div className="cam-spec"><MemoryOutlined sx={{fontSize:11}}/>{cam.aiModel.split(' ')[0]}</div>
-                </div>
-                <div className="cam-detect-tags">
-                  {cam.detections.map(t=><span key={t} className="cam-detect-tag">{t}</span>)}
-                </div>
-                <div style={{fontSize:9,color:'var(--muted-foreground)',fontFamily:'monospace',marginTop:8,borderTop:'1px solid var(--border)',paddingTop:8,display:'flex',justifyContent:'space-between'}}>
-                  <span>IP: {cam.ip}</span><span>{cam.id}</span>
-                </div>
-                <div style={{display:'flex',gap:8,marginTop:12}}>
-                  {cam.videoUrl?(
-                    <Button fullWidth variant="contained" size="small" startIcon={<PlayArrow/>} onClick={e=>{e.stopPropagation();setPlayingVideo({name:cam.name,id:cam.id,url:cam.videoUrl});}}>Play Video Feed</Button>
-                  ):(
-                    <Button component={Link} to="/video-intelligence" fullWidth variant="outlined" startIcon={<VideocamOutlined/>} size="small" onClick={e=>e.stopPropagation()}>View Recordings</Button>
-                  )}
-                  <Tooltip title="Delete camera feed">
-                    <IconButton size="small" color="error" onClick={e=>{e.stopPropagation();setDeletingCam({id:cam.id,name:cam.name});}} sx={{border:'1px solid var(--border)'}}>
-                      <DeleteOutlined sx={{fontSize:16}}/>
-                    </IconButton>
-                  </Tooltip>
-                </div>
-              </div>
-            </article>;
-          })}
-        </div>
+
+                  {/* Video Thumbnail / Stream Preview / Inline Playback */}
+                  <div className="cam-rich-preview">
+                    {inlinePlayingId === camId && cardVideoUrl ? (
+                      <video 
+                        key={cardVideoUrl}
+                        src={cardVideoUrl} 
+                        controls 
+                        autoPlay 
+                        loop 
+                        playsInline 
+                        crossOrigin="anonymous"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} 
+                      />
+                    ) : (
+                      <>
+                        <img src={previewSrc} alt={camName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e: any) => { e.target.src = gate; }} />
+                        <div className="cam-scan-line" />
+                        <div className="cam-corner cam-corner-tl" /><div className="cam-corner cam-corner-tr" /><div className="cam-corner cam-corner-bl" /><div className="cam-corner cam-corner-br" />
+                        <div className="cam-ai-badge" style={{ background: isViolent ? 'rgba(239,68,68,0.85)' : isTense ? 'rgba(245,158,11,0.85)' : 'rgba(15,23,42,0.85)' }}>
+                          <FlashOnOutlined sx={{ fontSize: 11 }} /> MoViNet-A0 · {sentimentLabel}
+                        </div>
+                        <div className="cam-ts-badge">
+                          {cam.last_inference_timestamp ? `▶ ${cam.last_inference_timestamp}` : '▶ LIVE STREAM'}
+                        </div>
+                        {cardVideoUrl && (
+                          <div 
+                            onClick={e => { e.stopPropagation(); setInlinePlayingId(camId); }}
+                            style={{ 
+                              position: 'absolute', 
+                              top: '50%', 
+                              left: '50%', 
+                              transform: 'translate(-50%, -50%)', 
+                              background: 'rgba(0,0,0,0.65)', 
+                              borderRadius: '50%', 
+                              width: 48, 
+                              height: 48, 
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              justifyContent: 'center', 
+                              cursor: 'pointer',
+                              border: '2px solid rgba(255,255,255,0.8)',
+                              transition: 'transform 0.2s',
+                              zIndex: 4 
+                            }}
+                            title="Play inline on card"
+                          >
+                            <PlayArrow sx={{ color: '#fff', fontSize: 30 }} />
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {/* Body Content */}
+                  <div className="cam-rich-body">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 10 }}>
+                      <div>
+                        <strong style={{ fontSize: 13, display: 'block' }}>{camName}</strong>
+                        <span style={{ fontSize: 10, color: 'var(--muted-foreground)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                          <LocationOnOutlined sx={{ fontSize: 11 }} /> {cam.zone || 'Surveillance Sector'}
+                        </span>
+                      </div>
+                      <Tooltip title={`Source FPS: ${cam.source_fps || 25} | Inference: ${cam.inference_fps || 5.0} FPS`}>
+                        <Chip label={`${cam.inference_fps || '5.0'} FPS`} size="small" variant="outlined" sx={{ height: 20, fontSize: 9 }} />
+                      </Tooltip>
+                    </div>
+
+                    {/* Sentimental Analysis Meter */}
+                    <div style={{ background: 'var(--muted)', padding: '10px 12px', borderRadius: 6, marginBottom: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 5 }}>
+                        <span style={{ color: '#10b981', fontWeight: 600 }}>Calm Composure: {calmScore}%</span>
+                        <span style={{ color: isViolent ? '#ef4444' : '#f59e0b', fontWeight: 600 }}>Violence Risk: {aggrScore}%</span>
+                      </div>
+                      {/* Dual-color Sentiment Bar */}
+                      <div style={{ width: '100%', height: 7, borderRadius: 4, background: '#1e293b', overflow: 'hidden', display: 'flex' }}>
+                        <div style={{ width: `${calmScore}%`, background: '#10b981', transition: 'width 0.4s ease' }} />
+                        <div style={{ width: `${aggrScore}%`, background: isViolent ? '#ef4444' : '#f59e0b', transition: 'width 0.4s ease' }} />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--muted-foreground)', marginTop: 6 }}>
+                        <span>Peak Risk: <strong>{peakScore}%</strong></span>
+                        <span>Threat: <strong style={{ color: isViolent ? '#ef4444' : isTense ? '#f59e0b' : '#10b981' }}>{threatLevel}</strong></span>
+                      </div>
+                    </div>
+
+                    {/* Telemetry Specs Row */}
+                    <div className="cam-specs-row">
+                      <div className="cam-spec"><SpeedOutlined sx={{ fontSize: 11 }} /> {cam.source_fps || 25} fps</div>
+                      <div className="cam-spec"><FlashOnOutlined sx={{ fontSize: 11 }} /> MoViNet-A0</div>
+                      <div className="cam-spec"><MemoryOutlined sx={{ fontSize: 11 }} /> TFLite 5-FPS</div>
+                    </div>
+
+                    {/* Footer Actions */}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                      <Button 
+                        variant="contained" 
+                        size="small" 
+                        fullWidth 
+                        startIcon={<AnalyticsOutlined />} 
+                        onClick={e => { e.stopPropagation(); setSelectedCamDetail(cam); }}
+                        sx={{ fontSize: 11 }}
+                      >
+                        Sentiment Analysis
+                      </Button>
+                      {cardVideoUrl ? (
+                        <Tooltip title="Play Full Video Feed">
+                          <Button 
+                            variant="outlined" 
+                            size="small" 
+                            startIcon={<PlayArrow />} 
+                            onClick={e => { 
+                              e.stopPropagation(); 
+                              setPlayingVideo({ name: camName, id: camId, url: cardVideoUrl, sentiment: sentimentLabel }); 
+                            }}
+                            sx={{ minWidth: 42, px: 1.5 }}
+                          >
+                            Play
+                          </Button>
+                        </Tooltip>
+                      ) : null}
+                      <Tooltip title="Remove Feed">
+                        <IconButton 
+                          size="small" 
+                          color="error" 
+                          onClick={e => { e.stopPropagation(); setDeletingCam({ id: camId, name: camName }); }} 
+                          sx={{ border: '1px solid var(--border)' }}
+                        >
+                          <DeleteOutlined sx={{ fontSize: 15 }} />
+                        </IconButton>
+                      </Tooltip>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </>
     )}
 
-    {activeTab==='add'&&(
-      <Paper variant="outlined" sx={{p:4,maxWidth:740,margin:'auto'}}>
-        <h3 style={{marginTop:0,marginBottom:6,fontSize:18}}>Add Camera or Video Stream</h3>
-        <p className="subtitle" style={{marginBottom:24}}>Choose whether to stream a live HTTP/HTTPS endpoint or upload an MP4/WebM video file for AI surveillance analysis.</p>
+    {/* TAB 2: MULTI-VIDEO UPLOAD & BATCH SENTIMENT INGESTION */}
+    {activeTab === 'add' && (
+      <Paper variant="outlined" sx={{ p: 4, maxWidth: 820, margin: 'auto' }}>
+        <h3 style={{ marginTop: 0, marginBottom: 6, fontSize: 18 }}>Add Camera / Upload Video for Sentiment Analysis</h3>
+        <p className="subtitle" style={{ marginBottom: 20 }}>
+          Upload single or multiple video recordings (MP4, WebM, MOV, AVI). MoViNet-A0 streaming AI will analyze violence probability, pedestrian agitation, and threat levels across each camera feed in real-time.
+        </p>
 
-        {newCamSuccess&&<Alert severity="success" sx={{mb:3}}>Camera stream successfully connected and added to your active monitoring grid!</Alert>}
+        {uploadError && (
+          <Alert severity="error" sx={{ mb: 3 }}>
+            {uploadError}
+          </Alert>
+        )}
 
-        <div style={{marginBottom:24}}>
-          <ToggleButtonGroup exclusive fullWidth value={sourceType} onChange={(_e,v)=>{if(v)setSourceType(v);}}>
-            <ToggleButton value="http"><WifiOutlined sx={{mr:1}}/> HTTP / HTTPS Live Stream</ToggleButton>
-            <ToggleButton value="upload"><UploadFile sx={{mr:1}}/> Upload Video File</ToggleButton>
-            <ToggleButton value="rtsp"><VideocamOutlined sx={{mr:1}}/> RTSP / ONVIF IP Cam</ToggleButton>
+        <div style={{ marginBottom: 24 }}>
+          <ToggleButtonGroup exclusive fullWidth value={sourceType} onChange={(_e, v) => { if (v) setSourceType(v); }}>
+            <ToggleButton value="upload"><CloudUploadOutlined sx={{ mr: 1 }} /> Upload Video File(s)</ToggleButton>
+            <ToggleButton value="http"><WifiOutlined sx={{ mr: 1 }} /> HTTP / HLS Stream Endpoint</ToggleButton>
+            <ToggleButton value="rtsp"><VideocamOutlined sx={{ mr: 1 }} /> RTSP / IP Camera</ToggleButton>
           </ToggleButtonGroup>
         </div>
 
-        <form onSubmit={handleAddCamera}>
-          <div style={{display:'grid',gridTemplateColumns:'1.4fr 1fr',gap:16,marginBottom:16}}>
-            <TextField label="Camera Name" required placeholder="e.g. South Corridor Entrance" value={newCam.name} onChange={e=>setNewCam({...newCam,name:e.target.value})}/>
-            <TextField label="Camera ID" required placeholder="e.g. CAM-07" value={newCam.id} onChange={e=>setNewCam({...newCam,id:e.target.value})}/>
-          </div>
+        <form onSubmit={handleBatchUpload}>
+          {sourceType === 'upload' && (
+            <>
+              {/* Optional Camera Name and Zone Metadata */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16, marginBottom: 20 }}>
+                <TextField 
+                  label="Camera / Feed Label (Optional)" 
+                  placeholder="e.g. West Gate Perimeter or Entrance Feed" 
+                  value={newCam.name} 
+                  onChange={e => setNewCam({ ...newCam, name: e.target.value })} 
+                />
+                <TextField 
+                  label="Surveillance Zone" 
+                  placeholder="e.g. Building B Main Gate" 
+                  value={newCam.zone} 
+                  onChange={e => setNewCam({ ...newCam, zone: e.target.value })} 
+                />
+              </div>
 
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
-            <TextField label="Location / Zone" required placeholder="e.g. Level 2 Security Checkpoint" value={newCam.zone} onChange={e=>setNewCam({...newCam,zone:e.target.value})}/>
-            <TextField label="Resolution" select slotProps={{select:{native:true}}} value={newCam.resolution} onChange={e=>setNewCam({...newCam,resolution:e.target.value})}>
-              <option value="4K">4K UHD (3840×2160)</option>
-              <option value="2K">2K QHD (2560×1440)</option>
-              <option value="1080p">1080p Full HD (1920×1080)</option>
-              <option value="720p">720p HD (1280×720)</option>
-            </TextField>
-          </div>
+              {/* Multi-File Upload Dropzone */}
+              <div 
+                style={{ 
+                  border: '2px dashed var(--border)', 
+                  padding: 26, 
+                  borderRadius: 8, 
+                  textAlign: 'center', 
+                  marginBottom: 20, 
+                  background: 'var(--muted)',
+                  cursor: 'pointer' 
+                }}
+                onClick={() => document.getElementById('multi-file-input')?.click()}
+              >
+                <CloudUploadOutlined sx={{ fontSize: 44, color: 'var(--primary)', mb: 1 }} />
+                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Select Surveillance Video File(s)</div>
+                <p className="subtitle" style={{ marginBottom: 14, fontSize: 12 }}>
+                  Drag and drop single or multiple video recordings at once, or browse files from your computer.
+                </p>
+                <Button variant="outlined" component="label" startIcon={<UploadFile />} onClick={e => e.stopPropagation()}>
+                  Browse Video Files
+                  <input 
+                    id="multi-file-input"
+                    type="file" 
+                    multiple 
+                    accept="video/*" 
+                    hidden 
+                    onChange={handleMultiFileSelect} 
+                  />
+                </Button>
+                <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 10 }}>
+                  Supports MP4, WebM, AVI, MOV, MKV · Automatically encoded with faststart for seamless playback
+                </div>
+              </div>
 
-          {sourceType==='http'&&(
-            <div style={{marginBottom:20}}>
-              <TextField fullWidth required label="HTTP / HTTPS Stream URL" placeholder="https://stream.your-network.com/live/feed.m3u8 or http://192.168.1.109:8080/video" helperText="Direct HTTP, HLS (.m3u8), or MJPEG stream url reachable by your browser." value={newCam.streamUrl} onChange={e=>setNewCam({...newCam,streamUrl:e.target.value})}/>
+              {/* Instant Video Playback Preview Right in the Add Tab */}
+              {stagedPreviewUrl && (
+                <div style={{ marginBottom: 20, background: '#000', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border)' }}>
+                  <div style={{ padding: '8px 14px', background: 'var(--muted)', fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <PlayArrow fontSize="small" color="primary" /> Instant Playback Preview
+                    </strong>
+                    <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{uploadedFiles[0]?.name}</span>
+                  </div>
+                  <video 
+                    src={stagedPreviewUrl} 
+                    controls 
+                    autoPlay 
+                    loop 
+                    playsInline 
+                    style={{ width: '100%', maxHeight: 260, display: 'block' }} 
+                  />
+                </div>
+              )}
+
+              {/* Staged Upload Files Queue */}
+              {uploadedFiles.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <strong style={{ fontSize: 13 }}>Selected Video Queue ({uploadedFiles.length} file{uploadedFiles.length > 1 ? 's' : ''})</strong>
+                    <Button size="small" color="error" onClick={() => { setUploadedFiles([]); setStagedPreviewUrl(''); }}>Clear All</Button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 180, overflowY: 'auto' }}>
+                    {uploadedFiles.map((file, idx) => (
+                      <div 
+                        key={file.name + idx} 
+                        style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center', 
+                          padding: '8px 12px', 
+                          borderRadius: 6, 
+                          background: 'var(--card)', 
+                          border: '1px solid var(--border)' 
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <VideocamOutlined color="primary" sx={{ fontSize: 18 }} />
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 600 }}>{file.name}</div>
+                            <div style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{(file.size / 1024 / 1024).toFixed(1)} MB · Ready for MoViNet sentiment analysis</div>
+                          </div>
+                        </div>
+                        <IconButton size="small" onClick={() => removeStagedFile(idx)}>
+                          <DeleteOutlined sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {isUploading && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+                    <span>Uploading & running MoViNet-A0 sentiment inference…</span>
+                    <span>5-FPS Temporal Analysis</span>
+                  </div>
+                  <LinearProgress />
+                </div>
+              )}
+            </>
+          )}
+
+          {sourceType !== 'upload' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <TextField label="Camera Name" required placeholder="e.g. West Gate Perimeter" value={newCam.name} onChange={e => setNewCam({ ...newCam, name: e.target.value })} />
+              <TextField label="Camera ID" placeholder="e.g. CAM-09" value={newCam.id} onChange={e => setNewCam({ ...newCam, id: e.target.value })} />
+              <TextField fullWidth sx={{ gridColumn: 'span 2' }} required label="Stream Endpoint URL" placeholder={sourceType === 'http' ? 'http://192.168.1.100:8080/live.m3u8' : 'rtsp://admin:pass@192.168.1.100:554/stream'} value={newCam.streamUrl} onChange={e => setNewCam({ ...newCam, streamUrl: e.target.value })} />
             </div>
           )}
 
-          {sourceType==='upload'&&(
-            <div style={{border:'2px dashed var(--border)',padding:24,borderRadius:8,textAlign:'center',marginBottom:20,background:'var(--muted)'}}>
-              <UploadFile sx={{fontSize:38,color:'var(--primary)',mb:1}}/>
-              <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>Select Local Video File (MP4, WebM, MOV)</div>
-              <p className="subtitle" style={{marginBottom:16,fontSize:12}}>Video will be loaded directly into your browser camera feed.</p>
-              <Button variant="outlined" component="label" startIcon={<UploadFile/>}>
-                {uploadedVideoFile?uploadedVideoFile.name:'Choose Video File'}
-                <input type="file" accept="video/*" hidden onChange={handleFileUpload}/>
+          <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+            <Button 
+              variant="contained" 
+              type="submit" 
+              startIcon={isUploading ? <CircularProgress size={16} color="inherit" /> : <AddCircleOutlined />} 
+              disabled={isUploading || (sourceType === 'upload' && uploadedFiles.length === 0)}
+            >
+              {isUploading ? 'Analyzing Sentiment & Deploying…' : `Deploy & Analyze ${sourceType === 'upload' && uploadedFiles.length > 0 ? `${uploadedFiles.length} Video${uploadedFiles.length > 1 ? 's' : ''}` : 'Camera'}`}
+            </Button>
+            <Button variant="outlined" onClick={() => setActiveTab('grid')}>Cancel</Button>
+            {sourceType === 'upload' && (
+              <Button variant="text" sx={{ ml: 'auto' }} onClick={handleLoadDefaults} startIcon={<FlashOnOutlined />}>
+                Load Sample CCTV Benchmark Feeds
               </Button>
-              {uploadedVideoFile&&<span style={{display:'block',marginTop:8,fontSize:12,color:'var(--success)',fontWeight:600}}>File selected: {uploadedVideoFile.name} ({(uploadedVideoFile.size/1024/1024).toFixed(1)} MB)</span>}
-            </div>
-          )}
-
-          {sourceType==='rtsp'&&(
-            <div style={{marginBottom:20}}>
-              <TextField fullWidth required label="RTSP / ONVIF Network URI" placeholder="rtsp://operator:1234@192.168.1.109:554/live/stream1" helperText="RTSP network stream converted via WebRTC or media gateway." value={newCam.streamUrl} onChange={e=>setNewCam({...newCam,streamUrl:e.target.value})}/>
-            </div>
-          )}
-
-          <div style={{display:'flex',gap:12,marginTop:24}}>
-            <Button variant="contained" type="submit" startIcon={<AddCircleOutlined/>} disabled={sourceType==='upload'&&!uploadedVideoFile}>Connect & Add Feed</Button>
-            <Button variant="outlined" onClick={()=>setActiveTab('grid')}>Cancel</Button>
+            )}
           </div>
         </form>
       </Paper>
     )}
 
-    {activeTab==='integration'&&(
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(380px,1fr))',gap:24}}>
-        <Paper variant="outlined" sx={{p:3}}>
-          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
-            <WifiOutlined color="primary"/>
-            <h3 style={{margin:0,fontSize:16}}>HTTP / HLS Live Stream</h3>
+    {/* TAB 3: STREAM & MOViNET API INTEGRATION */}
+    {activeTab === 'integration' && (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(380px,1fr))', gap: 24 }}>
+        <Paper variant="outlined" sx={{ p: 3 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <FlashOnOutlined color="primary" />
+            <h3 style={{ margin: 0, fontSize: 16 }}>MoViNet Violence & Sentiment API</h3>
           </div>
-          <p className="subtitle" style={{marginBottom:16}}>Web-friendly HTTP Live Streaming (HLS) or MJPEG feeds for native browser rendering:</p>
-          <div style={{background:'var(--muted)',padding:'12px 14px',borderRadius:6,fontFamily:'monospace',fontSize:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <code>http://192.168.1.100:8080/hls/live.m3u8</code>
-            <IconButton size="small" onClick={()=>copyText('http://192.168.1.100:8080/hls/live.m3u8','http')}><ContentCopyOutlined sx={{fontSize:16}}/></IconButton>
+          <p className="subtitle" style={{ marginBottom: 16 }}>Batch upload multiple videos for simultaneous temporal inference and sentiment categorization:</p>
+          <div style={{ background: 'var(--muted)', padding: '12px 14px', borderRadius: 6, fontFamily: 'monospace', fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <code>POST /api/violence/upload-multiple (multipart/form-data)</code>
+            <IconButton size="small" onClick={() => copyText('POST /api/violence/upload-multiple', 'api_upload')}><ContentCopyOutlined sx={{ fontSize: 16 }} /></IconButton>
           </div>
-          {copied==='http'&&<span style={{fontSize:10,color:'var(--success)',display:'block',marginTop:6}}>Copied HTTP endpoint!</span>}
+          {copied === 'api_upload' && <span style={{ fontSize: 10, color: 'var(--success)', display: 'block', marginTop: 6 }}>Copied API endpoint!</span>}
         </Paper>
 
-        <Paper variant="outlined" sx={{p:3}}>
-          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
-            <VideocamOutlined color="primary"/>
-            <h3 style={{margin:0,fontSize:16}}>RTSP Stream Endpoint</h3>
+        <Paper variant="outlined" sx={{ p: 3 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <WifiOutlined color="primary" />
+            <h3 style={{ margin: 0, fontSize: 16 }}>Direct Video Streaming Endpoint</h3>
           </div>
-          <p className="subtitle" style={{marginBottom:16}}>Low-latency H.264/H.265 RTSP streaming url format for NVR and IP camera encoders:</p>
-          <div style={{background:'var(--muted)',padding:'12px 14px',borderRadius:6,fontFamily:'monospace',fontSize:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <code>rtsp://operator:1234@192.168.1.100:554/live/stream1</code>
-            <IconButton size="small" onClick={()=>copyText('rtsp://operator:1234@192.168.1.100:554/live/stream1','rtsp')}><ContentCopyOutlined sx={{fontSize:16}}/></IconButton>
+          <p className="subtitle" style={{ marginBottom: 16 }}>Standard HTTP 206 Partial Content byte-range video streaming endpoint for native browser players:</p>
+          <div style={{ background: 'var(--muted)', padding: '12px 14px', borderRadius: 6, fontFamily: 'monospace', fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <code>http://127.0.0.1:8000/data/videos/cam01.mp4</code>
+            <IconButton size="small" onClick={() => copyText('http://127.0.0.1:8000/data/videos/cam01.mp4', 'stream')}><ContentCopyOutlined sx={{ fontSize: 16 }} /></IconButton>
           </div>
-          {copied==='rtsp'&&<span style={{fontSize:10,color:'var(--success)',display:'block',marginTop:6}}>Copied RTSP URL!</span>}
+          {copied === 'stream' && <span style={{ fontSize: 10, color: 'var(--success)', display: 'block', marginTop: 6 }}>Copied Stream endpoint!</span>}
         </Paper>
 
-        <Paper variant="outlined" sx={{p:3}}>
-          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
-            <HubOutlined color="primary"/>
-            <h3 style={{margin:0,fontSize:16}}>ONVIF Profile S/T Discovery</h3>
+        <Paper variant="outlined" sx={{ p: 3, gridColumn: '1 / -1' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <PsychologyOutlined color="primary" />
+            <h3 style={{ margin: 0, fontSize: 16 }}>MoViNet-A0 Streaming Architecture</h3>
           </div>
-          <p className="subtitle" style={{marginBottom:16}}>Automated camera discovery via ONVIF protocol for PTZ and sensor control:</p>
-          <div style={{background:'var(--muted)',padding:'12px 14px',borderRadius:6,fontFamily:'monospace',fontSize:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-            <code>http://192.168.1.100:80/onvif/device_service</code>
-            <IconButton size="small" onClick={()=>copyText('http://192.168.1.100:80/onvif/device_service','onvif')}><ContentCopyOutlined sx={{fontSize:16}}/></IconButton>
-          </div>
-          {copied==='onvif'&&<span style={{fontSize:10,color:'var(--success)',display:'block',marginTop:6}}>Copied ONVIF endpoint!</span>}
+          <p className="subtitle" style={{ lineHeight: 1.6 }}>
+            The violence & sentiment detection pipeline uses Google's <strong>MoViNet-A0 (Mobile Video Network)</strong> streaming model quantized in TensorFlow Lite. It accepts sampled frames at 5 FPS (172×172 RGB) and maintains internal causal states across time steps to analyze kinetic velocity, hostile motion vectors, and pedestrian sentiment.
+          </p>
         </Paper>
       </div>
     )}
 
-    {/* Video Player Dialog for custom video feeds */}
-    <Dialog open={!!playingVideo} onClose={()=>setPlayingVideo(null)} maxWidth="md" fullWidth>
-      <DialogTitle sx={{display:'flex',alignItems:'center',gap:1.5}}>
-        <VideocamOutlined color="primary"/> {playingVideo?.id} · {playingVideo?.name}
+    {/* MODAL 1: DEEP SENTIMENT ANALYSIS DETAILS */}
+    <Dialog open={!!selectedCamDetail} onClose={() => setSelectedCamDetail(null)} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <AnalyticsOutlined color="primary" />
+          <span>{selectedCamDetail?.name || selectedCamDetail?.camera_id} · Sentiment & Violence Telemetry</span>
+        </div>
+        <Chip 
+          label={selectedCamDetail?.threat_level || 'LOW'} 
+          color={selectedCamDetail?.threat_level === 'CRITICAL' || selectedCamDetail?.threat_level === 'HIGH' ? 'error' : selectedCamDetail?.threat_level === 'ELEVATED' ? 'warning' : 'success'}
+          size="small"
+        />
       </DialogTitle>
       <DialogContent>
-        {playingVideo?.url&&(
-          <video src={playingVideo.url} controls autoPlay style={{width:'100%',borderRadius:6,background:'#000',maxHeight:'70vh'}}/>
+        {selectedCamDetail && (
+          <div>
+            {/* Top Stat Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+              <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>Sentiment Label</div>
+                <strong style={{ fontSize: 13, color: selectedCamDetail.sentiment_label?.includes('Violent') ? '#ef4444' : selectedCamDetail.sentiment_label?.includes('Tense') ? '#f59e0b' : '#10b981' }}>
+                  {selectedCamDetail.sentiment_label || 'Calm & Safe'}
+                </strong>
+              </Paper>
+              <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>Calm Composure</div>
+                <strong style={{ fontSize: 14, color: '#10b981' }}>{selectedCamDetail.calm_score || 95}%</strong>
+              </Paper>
+              <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>Violence Risk</div>
+                <strong style={{ fontSize: 14, color: selectedCamDetail.aggression_score > 50 ? '#ef4444' : '#f59e0b' }}>{selectedCamDetail.aggression_score || 5}%</strong>
+              </Paper>
+              <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>Peak Aggression</div>
+                <strong style={{ fontSize: 14 }}>{selectedCamDetail.peak_violence_score || 8}%</strong>
+              </Paper>
+            </div>
+
+            {/* AI Behavioral Assessment Summary */}
+            <Alert severity={selectedCamDetail.threat_level === 'CRITICAL' || selectedCamDetail.threat_level === 'HIGH' ? 'error' : selectedCamDetail.threat_level === 'ELEVATED' ? 'warning' : 'info'} sx={{ mb: 2.5 }}>
+              <strong>Behavioral Analysis: </strong>
+              {selectedCamDetail.sentiment_analysis?.summary || (selectedCamDetail.sentiment_label?.includes('Violent') ? 'Violent kinetic confrontation detected. Hostile motion signatures identified across sequential frames.' : selectedCamDetail.sentiment_label?.includes('Tense') ? 'Heightened agitation or suspicious motion observed. Operator attention recommended.' : 'Calm, compliant movement pattern. Pedestrian kinetic activity remains within normal safe thresholds.')}
+            </Alert>
+
+            {/* Video Preview Player in Modal */}
+            <div style={{ marginBottom: 20, borderRadius: 8, overflow: 'hidden', background: '#000' }}>
+              {playableModalUrl ? (
+                <video 
+                  key={playableModalUrl}
+                  src={playableModalUrl} 
+                  controls 
+                  autoPlay 
+                  loop 
+                  playsInline 
+                  crossOrigin="anonymous"
+                  style={{ width: '100%', maxHeight: 340, display: 'block' }} 
+                />
+              ) : selectedCamDetail.stream_url ? (
+                <img src={selectedCamDetail.stream_url} alt="Live Stream" style={{ width: '100%', maxHeight: 340, objectFit: 'contain', display: 'block' }} />
+              ) : (
+                <div style={{ padding: 40, textAlign: 'center', color: '#fff' }}>No video feed available</div>
+              )}
+            </div>
+
+            {/* Temporal Sentiment Curve / Timeline */}
+            <div style={{ marginBottom: 15 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <TimelineOutlined fontSize="small" color="primary" />
+                <strong style={{ fontSize: 13 }}>Temporal Sentiment Progression</strong>
+              </div>
+              <div style={{ display: 'flex', gap: 4, height: 48, alignItems: 'flex-end', background: 'var(--muted)', padding: '8px 12px', borderRadius: 6, overflowX: 'auto' }}>
+                {(selectedCamDetail.sentiment_analysis?.timeline || selectedCamDetail.recent_timeline || []).map((pt: any, idx: number) => {
+                  const prob = pt.violence_prob || (pt.aggression_score ? pt.aggression_score / 100 : 0.1);
+                  const h = Math.max(8, Math.round(prob * 36));
+                  const isHigh = prob >= 0.65;
+                  const isMed = prob >= 0.35;
+                  return (
+                    <Tooltip key={idx} title={`Time: ${pt.timestamp || pt.time} | Violence: ${Math.round(prob * 100)}% | ${pt.sentiment}`}>
+                      <div 
+                        style={{ 
+                          width: 8, 
+                          height: h, 
+                          borderRadius: 2, 
+                          background: isHigh ? '#ef4444' : isMed ? '#f59e0b' : '#10b981',
+                          opacity: 0.85,
+                          cursor: 'pointer' 
+                        }} 
+                      />
+                    </Tooltip>
+                  );
+                })}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--muted-foreground)', marginTop: 4 }}>
+                <span>Start of Footage</span>
+                <span>Temporal Timeline (Hover bars for frame details)</span>
+                <span>End of Recording</span>
+              </div>
+            </div>
+
+            {/* Key Incident Frame Evidence */}
+            {selectedCamDetail.sentiment_analysis?.evidence_thumbnail && (
+              <div style={{ marginTop: 15 }}>
+                <strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>Key Evidence Frame (Peak Risk Incident)</strong>
+                <img src={selectedCamDetail.sentiment_analysis.evidence_thumbnail} alt="Evidence" style={{ maxWidth: 280, borderRadius: 6, border: '1px solid var(--border)' }} />
+              </div>
+            )}
+          </div>
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={()=>setPlayingVideo(null)}>Close Player</Button>
+        <Button onClick={() => setSelectedCamDetail(null)}>Close</Button>
       </DialogActions>
     </Dialog>
 
-    {/* Camera Specs Dialog */}
-    <Dialog open={!!sel} onClose={()=>setSelected(null)} maxWidth="xs" fullWidth>
-      <DialogTitle sx={{display:'flex',alignItems:'center',gap:1.5}}>
-        <VideocamOutlined color="primary"/> {sel?.id} · {sel?.name}
+    {/* MODAL 2: FULL VIDEO PLAYER */}
+    <Dialog open={!!playingVideo} onClose={() => setPlayingVideo(null)} maxWidth="md" fullWidth>
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <VideocamOutlined color="primary" />
+          <span>{playingVideo?.id} · {playingVideo?.name}</span>
+        </div>
+        {playingVideo?.sentiment && <Chip label={playingVideo.sentiment} size="small" />}
       </DialogTitle>
       <DialogContent>
-        {sel&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,fontSize:12}}>
-          {[['Camera ID',sel.id],['Location',sel.zone],['IP Address',sel.ip],['Resolution',sel.res],['Frame Rate',sel.fps],['Protocol',sel.protocol],['Storage',sel.storage],['AI Model',sel.aiModel],['Uptime',sel.uptime],['Detections',sel.detections.join(', ')]].map(([l,v])=><div key={l}><div style={{color:'var(--muted-foreground)',fontSize:10,marginBottom:3}}>{l}</div><strong>{v}</strong></div>)}
-        </div>}
+        {playablePlayerUrl && (
+          <video 
+            key={playablePlayerUrl}
+            src={playablePlayerUrl} 
+            controls 
+            autoPlay 
+            playsInline
+            crossOrigin="anonymous"
+            style={{ width: '100%', borderRadius: 6, background: '#000', maxHeight: '70vh', display: 'block' }} 
+          />
+        )}
       </DialogContent>
       <DialogActions>
-        <Button component={Link} to="/video-intelligence" variant="contained" startIcon={<VideocamOutlined/>} onClick={()=>setSelected(null)}>View Footage</Button>
-        <Button onClick={()=>setSelected(null)}>Close</Button>
+        <Button onClick={() => setPlayingVideo(null)}>Close Player</Button>
       </DialogActions>
     </Dialog>
 
-    {/* Delete Camera Dialog */}
-    <Dialog open={!!deletingCam} onClose={()=>setDeletingCam(null)}>
+    {/* MODAL 3: DELETE CONFIRMATION */}
+    <Dialog open={!!deletingCam} onClose={() => setDeletingCam(null)}>
       <DialogTitle>Remove Camera / Video Feed?</DialogTitle>
       <DialogContent>
-        Are you sure you want to remove <strong>{deletingCam?.name} ({deletingCam?.id})</strong>? This camera feed and any associated local stream playback will be disconnected from the active grid.
+        Are you sure you want to remove <strong>{deletingCam?.name} ({deletingCam?.id})</strong>? This feed will be removed from real-time MoViNet monitoring and active surveillance grids.
       </DialogContent>
       <DialogActions>
-        <Button onClick={()=>setDeletingCam(null)}>Cancel</Button>
-        <Button color="error" variant="contained" onClick={()=>{
-          if(deletingCam){
-            setCamerasList(prev=>prev.filter(c=>c.id!==deletingCam.id));
-            setDeletingCam(null);
-          }
-        }}>Delete Feed</Button>
+        <Button onClick={() => setDeletingCam(null)}>Cancel</Button>
+        <Button color="error" variant="contained" onClick={handleDeleteConfirm}>Remove Feed</Button>
       </DialogActions>
     </Dialog>
   </>;

@@ -15,6 +15,7 @@ from PIL import Image
 
 from services.siglip import SigLIPService
 from services.explainable_ai import call_explainable_ai, EXPLAINABLE_AI_API_URL
+from services.qdrant_service import qdrant_service
 
 logger = logging.getLogger(__name__)
 
@@ -105,15 +106,17 @@ class VideoService:
         max_frames: int = 32,
         sample_fps: float = 1.0,
         call_xai: bool = True,
+        camera_name: Optional[str] = None,
+        camera_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Complete video alignment pipeline:
         1. Extract video frames.
         2. Encode all frames via SigLIP 2 Image Encoder (batched).
-        3. Compute overall Video Embedding (mean pooling + L2 norm).
-        4. Encode User Query via SigLIP 2 Text Encoder.
-        5. Calculate Raw SigLIP2 Cosine similarities.
-        6. Calculate User-Facing Relative Match Score (Peak = 0.910, clamped [0.0, 1.0]).
+        3. Persist 768-dim frame embeddings to Qdrant Cloud vector database.
+        4. Compute overall Video Embedding (mean pooling + L2 norm).
+        5. Encode User Query via SigLIP 2 Text Encoder.
+        6. Calculate Raw SigLIP2 Cosine similarities.
         7. Rank frames by raw SigLIP2 cosine similarity.
         8. Accurately measure end-to-end and granular latencies with CUDA synchronization.
         """
@@ -136,6 +139,19 @@ class VideoService:
         frame_embeddings, img_lat = self.siglip.encode_images_batch(pil_images, batch_size=16)
         self.siglip._sync_cuda()
         t_img_ms = (time.perf_counter() - t_img_start) * 1000.0
+
+        # Step 2b: Persist frame vectors into Qdrant Cloud
+        qdrant_vectors_synced = 0
+        try:
+            qdrant_vectors_synced = qdrant_service.upsert_frames_batch(
+                video_id=video_path.name,
+                frames_meta=frames_meta,
+                embeddings=frame_embeddings,
+                camera_name=camera_name or "Camera",
+                camera_id=camera_id,
+            )
+        except Exception as q_err:
+            logger.warning("Could not sync frames to Qdrant Cloud: %s", q_err)
 
         # Step 3: Compute aggregated Video Embedding (mean pooling + L2 norm)
         mean_vec = np.mean(frame_embeddings, axis=0)
@@ -241,9 +257,13 @@ class VideoService:
             "frames_analyzed": len(frames_meta),
             "total_frames_extracted": len(frames_meta),  # compatibility
             "sample_fps": sample_fps,
+            "qdrant_vectors_synced": qdrant_vectors_synced,
             "processing_time": {
                 "total_seconds": t_total_sec,
                 "total_ms": round(t_total_ms, 2),
+                "total_generation_seconds": t_total_sec,
+                "ai_generation_seconds": round(xai_res.get("total_generation_seconds") or (xai_res.get("total_generation_ms", 0.0) / 1000.0) or (t_xai_ms / 1000.0), 2),
+                "ai_generation_ms": round(xai_res.get("total_generation_ms") or t_xai_ms, 2),
                 "breakdown": {
                     "frame_extraction_ms": round(t_ext_ms, 2),
                     "image_embedding_ms": round(t_img_ms, 2),
@@ -251,6 +271,7 @@ class VideoService:
                     "similarity_calc_ms": round(t_sim_ms, 2),
                     "ranking_ms": round(t_rank_ms, 2),
                     "explainable_ai_api_ms": round(t_xai_ms, 2),
+                    "ai_text_generation_ms": round(xai_res.get("total_generation_ms") or t_xai_ms, 2),
                     "total_ms": round(t_total_ms, 2),
                 },
             },
@@ -280,6 +301,12 @@ class VideoService:
                 "explanation": xai_res["explanation"],
                 "error": xai_res["error"],
                 "latency_ms": xai_res["latency_ms"],
+                "total_generation_ms": xai_res.get("total_generation_ms", round(t_xai_ms, 2)),
+                "total_generation_seconds": xai_res.get("total_generation_seconds", round(t_xai_ms / 1000.0, 2)),
+                "chunks_count": xai_res.get("chunks_count", 0),
+                "words_count": xai_res.get("words_count", 0),
+                "words_per_second": xai_res.get("words_per_second", 0.0),
+                "first_chunk_latency_ms": xai_res.get("first_chunk_latency_ms"),
                 "image_url": xai_res.get("image_url"),
                 "storage_bucket": xai_res.get("storage_bucket"),
                 "storage_key": xai_res.get("storage_key"),

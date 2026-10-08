@@ -1,6 +1,7 @@
 import axios from 'axios';
 import gate from '@/assets/gate-camera.jpg';
 export const backendUrl = ((import.meta.env['VITE_AI_BACKEND_URL'] as string | undefined)?.replace(/\/+$/, '')) || 'http://127.0.0.1:8000';
+export const aiModelsHost = ((import.meta.env['VITE_AI_MODELS_HOST'] as string | undefined)?.replace(/\/+$/, '')) || 'https://vijay.blk2np.qzz.io';
 export const ai = axios.create({baseURL:backendUrl,timeout:35000});
 
 export function resolveMediaUrl(url?: string): string | undefined {

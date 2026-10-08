@@ -258,6 +258,8 @@ class SigLIPService:
         inputs = self.processor(
             text=text_list,
             padding="max_length",
+            truncation=True,
+            max_length=64,
             return_tensors="pt",
         ).to(self.device)
         self._sync_cuda()
