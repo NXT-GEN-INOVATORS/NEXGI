@@ -1,4 +1,4 @@
-# Welcome to your Lovable project
+# Welcome to my project
 
 This project was built with [Lovable](https://lovable.dev).
 
